@@ -4,7 +4,6 @@ import sqlite3
 from datetime import datetime
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization, hashes
-from cryptography.exceptions import InvalidSignature
 
 # === Хеш-функція MD5 ===
 def md5_hash(data: str) -> str:
@@ -122,21 +121,26 @@ class CNUCoinSystem:
         prev_hash = self.get_last_blockchain_hash()
         prev_nonce = self.get_last_blockchain_nonce()
 
-        tx_data = f"{sender_id}{receiver_id}{amount}{prev_hash}{prev_nonce}"
-        ta_hash = md5_hash(tx_data)
-        signature = self.sign_data(sender_private_key[0], tx_data)
+        try:
+            conn.execute("BEGIN")   # старт транзакції
+            tx_data = f"{sender_id}{receiver_id}{amount}{prev_hash}{prev_nonce}"
+            ta_hash = md5_hash(tx_data)
+            signature = self.sign_data(sender_private_key[0], tx_data)
 
-        c.execute("INSERT INTO TransactionsTable VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                  (sender_id, ta_date, ta_id, sender_id, receiver_id, ta_hash, nonce, True, signature))
+            c.execute("INSERT INTO TransactionsTable VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                      (sender_id, ta_date, ta_id, sender_id, receiver_id, ta_hash, nonce, True, signature))
 
-        # Оновлення балансу
-        c.execute("UPDATE EWalletTable SET TASum = TASum - ? WHERE CNUCoinID = ?", (amount, sender_id))
-        c.execute("UPDATE EWalletTable SET TASum = TASum + ? WHERE CNUCoinID = ?", (amount, receiver_id))
+            # Оновлення балансу
+            c.execute("UPDATE EWalletTable SET TASum = TASum - ? WHERE CNUCoinID = ?", (amount, sender_id))
+            c.execute("UPDATE EWalletTable SET TASum = TASum + ? WHERE CNUCoinID = ?", (amount, receiver_id))
 
-        # Додавання в блокчейн
-        c.execute("INSERT INTO BlockChainTable VALUES (?, ?, ?, ?, ?)",
-                  (sender_id, ta_date, ta_hash, nonce, signature))
-        conn.commit()
+            # Додавання в блокчейн
+            c.execute("INSERT INTO BlockChainTable VALUES (?, ?, ?, ?, ?)",
+                      (sender_id, ta_date, ta_hash, nonce, signature))
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            raise e
 
 # === Демонстрація ===
 system = CNUCoinSystem()
